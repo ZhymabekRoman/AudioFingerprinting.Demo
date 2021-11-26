@@ -14,24 +14,54 @@ namespace SoundFingerprinting.AddictedCS.Demo
 {
     class Program
     {
-        static IAudioService audioService = new FFmpegAudioService();
-	static IModelService modelService = new InMemoryModelService(); // store fingerprints in RAM
-        // static IAudioService audioService = new SoundFingerprintingAudioService(); // default audio library
-
         static async Task Main(string[] args)
-        {
-	    var files = Directory.EnumerateFiles("./samples/", "*.mp3", SearchOption.AllDirectories);
-
-            foreach (var filename in files)
+	{
+	    if (args.Length < 3)
 	    {
-		Console.WriteLine(filename);
-	        await StoreForLaterRetrieval(filename);
+	        Console.WriteLine("Arguments count is < 3");
+		System.Environment.Exit(1);
+	    }
+
+	    var audioService = new FFmpegAudioService();
+	    var modelService = new InMemoryModelService(args[1]); // store fingerprints in RAM
+	    
+	    switch (args[0])
+    	    {
+                case "add":
+                    await StoreForLaterRetrieval(args[2], modelService, audioService);
+                    break;
+
+                case "match":
+                    var foundTrack = await GetBestMatchForSong(args[2], modelService, audioService);
+		    if (foundTrack is null)
+	            {
+		        Console.WriteLine("Это божественная музыка! Возможно, именно поэтому я не могу найти её. 😇");
+		    }
+		    else
+		    {
+		        Console.WriteLine(foundTrack?.Id);
+		    }
+                    break;
+
+                case "remove":
+                    modelService.DeleteTrack(Path.GetFileNameWithoutExtension(args[2]));;
+                    break;
+
+                default:
+                    Console.WriteLine($"Unknown command was passed: {args[0]}.");
+                    break;
             }
-            var foundTrack = await GetBestMatchForSong("recorder.mp3");
-            Console.WriteLine(foundTrack?.Id);
+	    // var files = Directory.EnumerateFiles("./samples/", "*.mp3", SearchOption.AllDirectories);
+	    // foreach (var filename in files)
+	    // {
+		// Console.WriteLine(filename);
+	        // await StoreForLaterRetrieval(filename, modelService, audioService);
+            // }
+	    
+	    modelService.Snapshot(args[1]);
         }
 
-        public static async Task<TrackData> GetBestMatchForSong(string queryAudioFile)
+        public static async Task<TrackData> GetBestMatchForSong(string queryAudioFile, InMemoryModelService modelService, FFmpegAudioService audioService)
 	{
             var mediaInfo = await FFProbe.AnalyseAsync(queryAudioFile);
 
@@ -43,14 +73,13 @@ namespace SoundFingerprinting.AddictedCS.Demo
             // query the underlying database for similar audio sub-fingerprints
             var queryResult = await QueryCommandBuilder.Instance.BuildQueryCommand()
                                                  .From(queryAudioFile, secondsToAnalyze, startAtSecond)
-                                                 .WithQueryConfig(new HighPrecisionQueryConfiguration())
                                                  .UsingServices(modelService, audioService)
                                                  .Query();
 
             return queryResult.BestMatch?.Track;
         }
 
-        public static async Task StoreForLaterRetrieval(string pathToAudioFile)
+        public static async Task StoreForLaterRetrieval(string pathToAudioFile, InMemoryModelService modelService, FFmpegAudioService audioService)
         {
             var track = new TrackInfo(Path.GetFileNameWithoutExtension(pathToAudioFile), string.Empty, string.Empty);
 
@@ -58,7 +87,6 @@ namespace SoundFingerprinting.AddictedCS.Demo
             var hashedFingerprints = await FingerprintCommandBuilder.Instance
                                         .BuildFingerprintCommand()
                                         .From(pathToAudioFile)
-                                        .WithFingerprintConfig(new HighPrecisionFingerprintConfiguration())
                                         .UsingServices(audioService)
                                         .Hash();
 
